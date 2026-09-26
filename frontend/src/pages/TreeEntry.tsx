@@ -22,6 +22,7 @@ import { useTreeStore } from '../stores/treeStore';
 import { useTreeStats } from '../hooks/useTreeStats';
 import TreeTable from '../components/common/TreeTable';
 import RoundTag from '../components/common/RoundTag';
+import { isRoundSealed, sealedRoundText } from '../utils/roundLock';
 import {
   HEALTH_CLASSES,
   TREE_ORIGINS,
@@ -88,7 +89,14 @@ export default function TreeEntry() {
     [stats.trees, speciesFilter],
   );
 
+  /** 当前查看的期次是否已封存（锁定往期且小于当前期） */
+  const sealed = isRoundSealed(plot, round);
+
   const submit = async () => {
+    if (sealed) {
+      setError(sealedRoundText(round));
+      return;
+    }
     if (!form.treeNo.trim()) {
       setError('树号必填');
       return;
@@ -101,7 +109,12 @@ export default function TreeEntry() {
       setError(`第 ${round} 期已存在树号 ${form.treeNo.trim()}`);
       return;
     }
-    await addTree({ ...form, treeNo: form.treeNo.trim(), species: form.species.trim(), round });
+    try {
+      await addTree({ ...form, treeNo: form.treeNo.trim(), species: form.species.trim(), round });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '录入失败');
+      return;
+    }
     setError('');
     setToast(`已录入第 ${round} 期样木 ${form.treeNo.trim()}（${diameterClassLabel(form.dbhCm)} cm 径阶）`);
     setForm({ ...form, treeNo: '', dbhCm: 10, heightM: 8, remark: '' });
@@ -171,15 +184,25 @@ export default function TreeEntry() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {sealed ? <Alert type="warning" showIcon message={sealedRoundText(round)} /> : null}
 
       <Row gutter={12}>
         <Col span={12}>
-          <Card size="small" title={`第 ${round} 期快速录入`}>
+          <Card
+            size="small"
+            title={
+              <Space size={8}>
+                <span>第 {round} 期快速录入</span>
+                {sealed ? <Tag color="default">已封存</Tag> : null}
+              </Space>
+            }
+          >
             <Space wrap size={8}>
               <Input
                 style={{ width: 110 }}
                 placeholder="树号"
                 value={form.treeNo}
+                disabled={sealed}
                 onChange={(e) => setForm({ ...form, treeNo: e.target.value })}
               />
               <AutoComplete
@@ -187,6 +210,7 @@ export default function TreeEntry() {
                 placeholder="树种（可联想）"
                 value={form.species}
                 options={SPECIES_POOL.map((s) => ({ value: s }))}
+                disabled={sealed}
                 onChange={(v) => setForm({ ...form, species: v })}
                 filterOption={(input, option) => String(option?.value ?? '').includes(input)}
               />
@@ -198,6 +222,7 @@ export default function TreeEntry() {
                   max={200}
                   step={0.1}
                   value={form.dbhCm}
+                  disabled={sealed}
                   onChange={(v) => setForm({ ...form, dbhCm: Number(v ?? 0) })}
                 />
               </span>
@@ -209,6 +234,7 @@ export default function TreeEntry() {
                   max={60}
                   step={0.1}
                   value={form.heightM}
+                  disabled={sealed}
                   onChange={(v) => setForm({ ...form, heightM: Number(v ?? 0) })}
                 />
               </span>
@@ -220,6 +246,7 @@ export default function TreeEntry() {
                   max={40}
                   step={0.1}
                   value={form.underBranchH}
+                  disabled={sealed}
                   onChange={(v) => setForm({ ...form, underBranchH: Number(v ?? 0) })}
                 />
               </span>
@@ -231,24 +258,28 @@ export default function TreeEntry() {
                   max={30}
                   step={0.1}
                   value={form.crownWidth}
+                  disabled={sealed}
                   onChange={(v) => setForm({ ...form, crownWidth: Number(v ?? 0) })}
                 />
               </span>
               <Select
                 style={{ width: 110 }}
                 value={form.status}
+                disabled={sealed}
                 onChange={(v) => setForm({ ...form, status: v as TreeStatus })}
                 options={TREE_STATUSES.map((s) => ({ value: s, label: s }))}
               />
               <Select
                 style={{ width: 90 }}
                 value={form.origin}
+                disabled={sealed}
                 onChange={(v) => setForm({ ...form, origin: v as TreeOrigin })}
                 options={TREE_ORIGINS.map((s) => ({ value: s, label: s }))}
               />
               <Select
                 style={{ width: 110 }}
                 value={form.healthClass}
+                disabled={sealed}
                 onChange={(v) => setForm({ ...form, healthClass: v })}
                 options={HEALTH_CLASSES.map((s) => ({ value: s, label: s }))}
               />
@@ -259,6 +290,7 @@ export default function TreeEntry() {
                   min={0}
                   max={45}
                   value={form.tiltDeg}
+                  disabled={sealed}
                   onChange={(v) => setForm({ ...form, tiltDeg: Number(v ?? 0) })}
                 />
               </span>
@@ -266,14 +298,17 @@ export default function TreeEntry() {
                 style={{ width: 220 }}
                 placeholder="位置描述，如「样地西南 3m」"
                 value={form.remark}
+                disabled={sealed}
                 onChange={(e) => setForm({ ...form, remark: e.target.value })}
               />
-              <Button type="primary" icon={<PlusOutlined />} onClick={submit}>
+              <Button type="primary" icon={<PlusOutlined />} disabled={sealed} onClick={submit}>
                 录入样木
               </Button>
             </Space>
             <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
-              当前待录径阶：{diameterClassLabel(form.dbhCm)} cm（按「6/8/12/16/20/24/28/32+」径阶自动归组）
+              {sealed
+                ? `第 ${round} 期已封存，仅可查看；录入请切换到第 ${plot.surveyRound} 期，或先在台账解锁往期。`
+                : `当前待录径阶：${diameterClassLabel(form.dbhCm)} cm（按「6/8/12/16/20/24/28/32+」径阶自动归组）`}
             </Typography.Paragraph>
           </Card>
         </Col>
@@ -312,14 +347,31 @@ export default function TreeEntry() {
         </Col>
       </Row>
 
-      <Card size="small" title={`第 ${round} 期样木清单（${rows.length} 株，可点胸径单元格直接修改）`}>
+      <Card
+        size="small"
+        title={
+          sealed
+            ? `第 ${round} 期样木清单（${rows.length} 株，已封存只读）`
+            : `第 ${round} 期样木清单（${rows.length} 株，可点胸径单元格直接修改）`
+        }
+      >
         <TreeTable
           items={rows}
           peers={peers}
-          onDbhChange={async (treeId, dbhCm) => {
-            await updateTree(treeId, { dbhCm });
-            setToast('胸径已更新，径阶与断面积同步重算');
-          }}
+          sealed={sealed}
+          sealedReason={sealedRoundText(round)}
+          onDbhChange={
+            sealed
+              ? undefined
+              : async (treeId, dbhCm) => {
+                  try {
+                    await updateTree(treeId, { dbhCm });
+                    setToast('胸径已更新，径阶与断面积同步重算');
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : '胸径更新失败');
+                  }
+                }
+          }
         />
       </Card>
     </Space>

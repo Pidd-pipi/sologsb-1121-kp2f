@@ -13,13 +13,15 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Typography,
   type TableProps,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { LockOutlined, PlusOutlined } from '@ant-design/icons';
 import { usePlotStore } from '../stores/plotStore';
 import { useRegenStore } from '../stores/regenStore';
 import RoundTag from '../components/common/RoundTag';
+import { isRoundSealed, sealedRoundText } from '../utils/roundLock';
 import {
   AGE_GROUPS,
   BROWSE_DAMAGES,
@@ -104,17 +106,47 @@ export default function RegenView() {
     {
       title: '期次',
       dataIndex: 'round',
-      width: 90,
-      render: (v: number) => `第 ${v} 期`,
+      width: 110,
+      render: (v: number) => (
+        <span>
+          第 {v} 期
+          {isRoundSealed(plot, v) ? (
+            <Tooltip title={sealedRoundText(v)}>
+              <LockOutlined style={{ color: '#8c8c8c', marginLeft: 4 }} />
+            </Tooltip>
+          ) : null}
+        </span>
+      ),
     },
     {
       title: '操作',
       width: 90,
-      render: (_: unknown, row: RegenShrub) => (
-        <Button size="small" danger onClick={() => removeRegen(row.id)}>
-          删除
-        </Button>
-      ),
+      render: (_: unknown, row: RegenShrub) => {
+        const sealed = isRoundSealed(plot, row.round);
+        const button = (
+          <Button
+            size="small"
+            danger
+            disabled={sealed}
+            onClick={async () => {
+              try {
+                await removeRegen(row.id);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : '删除失败');
+              }
+            }}
+          >
+            删除
+          </Button>
+        );
+        return sealed ? (
+          <Tooltip title={sealedRoundText(row.round)}>
+            <span>{button}</span>
+          </Tooltip>
+        ) : (
+          button
+        );
+      },
     },
   ];
 
@@ -149,6 +181,13 @@ export default function RegenView() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {plot.locked ? (
+        <Alert
+          type="info"
+          showIcon
+          message={`往期样方已封存：第 1 ~ ${plot.surveyRound - 1} 期记录仅可查看、不可删改；当前第 ${plot.surveyRound} 期可正常登记。`}
+        />
+      ) : null}
 
       <Card size="small" title="登记样方记录">
         <Space wrap size={8}>
@@ -210,7 +249,12 @@ export default function RegenView() {
                 setError('种类必填');
                 return;
               }
-              await addRegen({ ...form, species: form.species.trim() });
+              try {
+                await addRegen({ ...form, species: form.species.trim() });
+              } catch (err) {
+                setError(err instanceof Error ? err.message : '登记失败');
+                return;
+              }
               setError('');
               setToast(`已登记 ${form.layer} · ${form.species.trim()}（${form.count} 株）`);
               setForm({ ...form, species: '' });

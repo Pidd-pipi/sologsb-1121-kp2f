@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Alert, Button, Card, Col, Row, Select, Space, Statistic, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Row, Select, Space, Statistic, Tag, Tooltip, Typography } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import { usePlotStore } from '../stores/plotStore';
 import { useTreeStore } from '../stores/treeStore';
 import GrowthDiffTable from '../components/common/GrowthDiffTable';
 import RoundTag from '../components/common/RoundTag';
 import { loadRecheckDiffs, saveRecheckDiffs } from '../utils/db';
+import { isRoundSealed, sealedRoundText } from '../utils/roundLock';
 import { newId } from '../utils/id';
 import { growthRate, isDiffAbnormal, type RecheckDiff } from '../types/recheck';
 import type { TreeRecord } from '../types/tree';
@@ -102,12 +103,25 @@ export default function RecheckView() {
     setToast(`已生成第 ${baseRound} 期 → 第 ${targetRound} 期的逐株比对表，共 ${next.length} 条`);
   };
 
+  /** 待保存的比对结果是否落在已封存的往期 */
+  const sealedDiff = diffs.find((d) => isRoundSealed(plot, d.targetRound));
+
   const save = async () => {
     if (diffs.length === 0) {
       setError('请先生成比对表');
       return;
     }
-    await saveRecheckDiffs(diffs);
+    if (sealedDiff) {
+      setError(sealedRoundText(sealedDiff.targetRound));
+      return;
+    }
+    try {
+      await saveRecheckDiffs(diffs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败');
+      return;
+    }
+    setError('');
     setToast(`逐株比对表已写入本地档案库（${diffs.length} 条）`);
   };
 
@@ -152,6 +166,7 @@ export default function RecheckView() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {sealedDiff ? <Alert type="warning" showIcon message={sealedRoundText(sealedDiff.targetRound)} /> : null}
 
       <Card size="small">
         <Space wrap size={10}>
@@ -176,9 +191,19 @@ export default function RecheckView() {
           <Button type="primary" onClick={generate}>
             生成逐株比对表
           </Button>
-          <Button icon={<SaveOutlined />} onClick={save}>
-            保存比对结果
-          </Button>
+          {sealedDiff ? (
+            <Tooltip title={sealedRoundText(sealedDiff.targetRound)}>
+              <span>
+                <Button icon={<SaveOutlined />} disabled>
+                  保存比对结果
+                </Button>
+              </span>
+            </Tooltip>
+          ) : (
+            <Button icon={<SaveOutlined />} onClick={save}>
+              保存比对结果
+            </Button>
+          )}
           <Typography.Text type="secondary">
             可选期次：{rounds.length === 0 ? '暂无数据' : rounds.map((r) => `第 ${r} 期`).join('、')}
           </Typography.Text>

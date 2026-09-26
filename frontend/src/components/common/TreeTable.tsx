@@ -1,5 +1,5 @@
 import { InputNumber, Table, Tag, Tooltip, Typography, type TableProps } from 'antd';
-import { WarningOutlined } from '@ant-design/icons';
+import { LockOutlined, WarningOutlined } from '@ant-design/icons';
 import { diameterClassLabel } from '../../utils/forestCalc';
 import { isDbhAbnormal, type TreeRecord } from '../../types/tree';
 
@@ -10,6 +10,10 @@ export interface TreeTableProps {
   peers?: TreeRecord[];
   /** 行内改胸径 */
   onDbhChange?: (id: string, dbhCm: number) => void;
+  /** 整表封存（往期已锁定）：停用行内改胸径并标注 */
+  sealed?: boolean;
+  /** 封存说明（悬停胸径锁标时显示） */
+  sealedReason?: string;
   /** 是否展示径阶分组统计 */
   showClassSummary?: boolean;
   emptyText?: string;
@@ -22,6 +26,8 @@ export default function TreeTable({
   items,
   peers,
   onDbhChange,
+  sealed = false,
+  sealedReason = '该期已封存',
   showClassSummary = true,
   emptyText = '暂无样木记录',
 }: TreeTableProps) {
@@ -49,7 +55,14 @@ export default function TreeTable({
         const abnormal = isDbhAbnormal(row, reference);
         return (
           <span>
-            {onDbhChange ? (
+            {sealed ? (
+              <span>
+                {row.dbhCm}
+                <Tooltip title={sealedReason}>
+                  <LockOutlined style={{ color: '#8c8c8c', marginLeft: 6 }} />
+                </Tooltip>
+              </span>
+            ) : onDbhChange ? (
               <InputNumber
                 size="small"
                 min={0}

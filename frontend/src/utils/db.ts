@@ -4,6 +4,7 @@ import type { TreeRecord } from '../types/tree';
 import type { RegenShrub } from '../types/regen';
 import type { RecheckDiff } from '../types/recheck';
 import { newId } from './id';
+import { isRoundSealed, sealedRoundText } from './roundLock';
 
 export const DB_NAME = 'gbforestplot';
 export const DB_VERSION = 2;
@@ -69,6 +70,13 @@ export function readDbVersion(): number {
 }
 
 export async function saveRecheckDiffs(diffs: RecheckDiff[]): Promise<void> {
+  // 复查记录以「本期期次」归档：样地锁定往期后，小于当前期的比对结果拒绝写入或覆盖
+  for (const diff of diffs) {
+    const plot = await db.plots.get(diff.plotId);
+    if (isRoundSealed(plot, diff.targetRound)) {
+      throw new Error(sealedRoundText(diff.targetRound));
+    }
+  }
   await db.rechecks.bulkPut(diffs);
 }
 
