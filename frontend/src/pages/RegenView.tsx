@@ -13,12 +13,14 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Typography,
   type TableProps,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { LockOutlined, PlusOutlined } from '@ant-design/icons';
 import { usePlotStore } from '../stores/plotStore';
 import { useRegenStore } from '../stores/regenStore';
+import { ArchivedRoundError } from '../utils/db';
 import RoundTag from '../components/common/RoundTag';
 import {
   AGE_GROUPS,
@@ -43,6 +45,10 @@ export default function RegenView() {
   const regens = useRegenStore((s) => s.items);
   const addRegen = useRegenStore((s) => s.add);
   const removeRegen = useRegenStore((s) => s.remove);
+  const pastLocked = Boolean(plot?.locked);
+  const archiveMessage = plot
+    ? `第 ${plot.surveyRound} 期之前的样方记录已封存，不能新增、修改或移除；当前第 ${plot.surveyRound} 期仍可录入，解锁后可改动往期。`
+    : '';
 
   const rows = useMemo(
     () => regens.filter((r) => r.plotId === id).sort((a, b) => a.layer.localeCompare(b.layer) || b.heightCm - a.heightCm),
@@ -78,6 +84,16 @@ export default function RegenView() {
   const heightStats = heightClassStats(filtered);
   const totalCount = filtered.reduce((s, r) => s + r.count, 0);
 
+  const handleRemove = async (row: RegenShrub) => {
+    try {
+      await removeRegen(row.id);
+      setError('');
+      setToast(`已移除第 ${row.round} 期样方记录`);
+    } catch (err) {
+      setError(err instanceof ArchivedRoundError ? err.message : '样方记录移除失败，请重试');
+    }
+  };
+
   const columns: Columns = [
     {
       title: '层位',
@@ -109,12 +125,24 @@ export default function RegenView() {
     },
     {
       title: '操作',
-      width: 90,
-      render: (_: unknown, row: RegenShrub) => (
-        <Button size="small" danger onClick={() => removeRegen(row.id)}>
-          删除
-        </Button>
-      ),
+      width: 110,
+      render: (_: unknown, row: RegenShrub) => {
+        const rowArchived = Boolean(plot?.locked && row.round < plot.surveyRound);
+        if (!rowArchived) {
+          return (
+            <Button size="small" danger onClick={() => void handleRemove(row)}>
+              删除
+            </Button>
+          );
+        }
+        return (
+          <Tooltip title={`第 ${row.round} 期已封存，不能移除样方记录；解锁后恢复改动。`}>
+            <Button size="small" danger disabled icon={<LockOutlined />}>
+              已封存
+            </Button>
+          </Tooltip>
+        );
+      },
     },
   ];
 
@@ -149,8 +177,11 @@ export default function RegenView() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {pastLocked ? (
+        <Alert type="info" showIcon message="往期样方记录已封存" description={archiveMessage} />
+      ) : null}
 
-      <Card size="small" title="登记样方记录">
+      <Card size="small" title={`登记第 ${plot.surveyRound} 期样方记录`}>
         <Space wrap size={8}>
           <Select
             style={{ width: 110 }}
@@ -210,10 +241,14 @@ export default function RegenView() {
                 setError('种类必填');
                 return;
               }
-              await addRegen({ ...form, species: form.species.trim() });
-              setError('');
-              setToast(`已登记 ${form.layer} · ${form.species.trim()}（${form.count} 株）`);
-              setForm({ ...form, species: '' });
+              try {
+                await addRegen({ ...form, species: form.species.trim() });
+                setError('');
+                setToast(`已登记 ${form.layer} · ${form.species.trim()}（${form.count} 株）`);
+                setForm({ ...form, species: '' });
+              } catch (err) {
+                setError(err instanceof ArchivedRoundError ? err.message : '样方记录保存失败，请重试');
+              }
             }}
           >
             保存记录

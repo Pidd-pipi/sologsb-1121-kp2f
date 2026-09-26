@@ -1,5 +1,5 @@
 import { InputNumber, Table, Tag, Tooltip, Typography, type TableProps } from 'antd';
-import { WarningOutlined } from '@ant-design/icons';
+import { LockOutlined, WarningOutlined } from '@ant-design/icons';
 import { diameterClassLabel } from '../../utils/forestCalc';
 import { isDbhAbnormal, type TreeRecord } from '../../types/tree';
 
@@ -10,6 +10,8 @@ export interface TreeTableProps {
   peers?: TreeRecord[];
   /** 行内改胸径 */
   onDbhChange?: (id: string, dbhCm: number) => void;
+  /** 胸径编辑被封存时的说明；提供后输入框仅作只读展示 */
+  dbhReadOnlyReason?: string;
   /** 是否展示径阶分组统计 */
   showClassSummary?: boolean;
   emptyText?: string;
@@ -22,6 +24,7 @@ export default function TreeTable({
   items,
   peers,
   onDbhChange,
+  dbhReadOnlyReason,
   showClassSummary = true,
   emptyText = '暂无样木记录',
 }: TreeTableProps) {
@@ -49,7 +52,7 @@ export default function TreeTable({
         const abnormal = isDbhAbnormal(row, reference);
         return (
           <span>
-            {onDbhChange ? (
+            {onDbhChange && !dbhReadOnlyReason ? (
               <InputNumber
                 size="small"
                 min={0}
@@ -60,6 +63,13 @@ export default function TreeTable({
                 onChange={(v) => onDbhChange(row.id, Number(v ?? 0))}
                 style={{ width: 96 }}
               />
+            ) : dbhReadOnlyReason ? (
+              <Tooltip title={dbhReadOnlyReason}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <InputNumber size="small" value={row.dbhCm} disabled style={{ width: 96 }} />
+                  <LockOutlined style={{ color: '#8c8c8c' }} />
+                </span>
+              </Tooltip>
             ) : (
               row.dbhCm
             )}

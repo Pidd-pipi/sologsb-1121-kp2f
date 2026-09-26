@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import { db } from '../utils/db';
+import {
+  assertTreeCanAdd,
+  assertTreeCanRemove,
+  assertTreeCanUpdate,
+  assertTreesCanAdd,
+  db,
+} from '../utils/db';
 import { newId } from '../utils/id';
 import type { TreeRecord, TreeRecordDraft } from '../types/tree';
 
@@ -23,12 +29,14 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     set({ items: rows, loaded: true });
   },
   async add(draft) {
+    await assertTreeCanAdd(draft);
     const record: TreeRecord = { ...draft, id: newId('tree'), measuredAt: Date.now() };
     await db.trees.put(record);
     set({ items: [...get().items, record] });
     return record;
   },
   async addMany(drafts) {
+    await assertTreesCanAdd(drafts);
     const records: TreeRecord[] = drafts.map((d) => ({
       ...d,
       id: newId('tree'),
@@ -39,10 +47,12 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     return records;
   },
   async update(id, patch) {
+    await assertTreeCanUpdate(id, patch);
     await db.trees.update(id, patch);
     set({ items: get().items.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
   },
   async remove(id) {
+    await assertTreeCanRemove(id);
     await db.trees.delete(id);
     set({ items: get().items.filter((it) => it.id !== id) });
   },

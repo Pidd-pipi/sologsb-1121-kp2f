@@ -19,6 +19,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { usePlotStore } from '../stores/plotStore';
 import { useTreeStore } from '../stores/treeStore';
+import { ArchivedRoundError } from '../utils/db';
 import { useTreeStats } from '../hooks/useTreeStats';
 import TreeTable from '../components/common/TreeTable';
 import RoundTag from '../components/common/RoundTag';
@@ -53,6 +54,8 @@ export default function TreeEntry() {
 
   const stats = useTreeStats(id, round);
   const peers = trees.filter((t) => t.plotId === id);
+  const archived = Boolean(plot?.locked && round < plot.surveyRound);
+  const archiveMessage = `第 ${round} 期已封存，样木记录只读；当前第 ${plot?.surveyRound ?? '?'} 期仍可录入，解锁后可改动往期。`;
 
   const [speciesFilter, setSpeciesFilter] = useState('all');
   const [form, setForm] = useState<TreeRecordDraft>({
@@ -83,6 +86,11 @@ export default function TreeEntry() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  const selectableRounds = useMemo(
+    () => Array.from(new Set(plot ? [...rounds, plot.surveyRound] : rounds)).sort((a, b) => a - b),
+    [rounds, plot],
+  );
+
   const rows = useMemo(
     () => stats.trees.filter((t) => speciesFilter === 'all' || t.species === speciesFilter),
     [stats.trees, speciesFilter],
@@ -101,10 +109,14 @@ export default function TreeEntry() {
       setError(`第 ${round} 期已存在树号 ${form.treeNo.trim()}`);
       return;
     }
-    await addTree({ ...form, treeNo: form.treeNo.trim(), species: form.species.trim(), round });
-    setError('');
-    setToast(`已录入第 ${round} 期样木 ${form.treeNo.trim()}（${diameterClassLabel(form.dbhCm)} cm 径阶）`);
-    setForm({ ...form, treeNo: '', dbhCm: 10, heightM: 8, remark: '' });
+    try {
+      await addTree({ ...form, treeNo: form.treeNo.trim(), species: form.species.trim(), round });
+      setError('');
+      setToast(`已录入第 ${round} 期样木 ${form.treeNo.trim()}（${diameterClassLabel(form.dbhCm)} cm 径阶）`);
+      setForm({ ...form, treeNo: '', dbhCm: 10, heightM: 8, remark: '' });
+    } catch (err) {
+      setError(err instanceof ArchivedRoundError ? err.message : '样木保存失败，请重试');
+    }
   };
 
   if (!plot) {
@@ -148,7 +160,7 @@ export default function TreeEntry() {
               style={{ width: 130, marginLeft: 6 }}
               value={round}
               onChange={setRound}
-              options={(rounds.length ? rounds : [1]).map((r) => ({ value: r, label: `第 ${r} 期` }))}
+              options={selectableRounds.map((r) => ({ value: r, label: `第 ${r} 期` }))}
             />
           </span>
           <span>
@@ -171,10 +183,19 @@ export default function TreeEntry() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {archived ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={`第 ${round} 期已封存`}
+          description={archiveMessage}
+        />
+      ) : null}
 
       <Row gutter={12}>
         <Col span={12}>
-          <Card size="small" title={`第 ${round} 期快速录入`}>
+          <Card size="small" title={`第 ${round} 期快速录入${archived ? '（已封存，停止录入）' : ''}`}>
+            <fieldset disabled={archived} style={{ border: 0, margin: 0, padding: 0 }}>
             <Space wrap size={8}>
               <Input
                 style={{ width: 110 }}
@@ -275,6 +296,7 @@ export default function TreeEntry() {
             <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
               当前待录径阶：{diameterClassLabel(form.dbhCm)} cm（按「6/8/12/16/20/24/28/32+」径阶自动归组）
             </Typography.Paragraph>
+            </fieldset>
           </Card>
         </Col>
         <Col span={12}>
@@ -312,14 +334,22 @@ export default function TreeEntry() {
         </Col>
       </Row>
 
-      <Card size="small" title={`第 ${round} 期样木清单（${rows.length} 株，可点胸径单元格直接修改）`}>
+      <Card
+        size="small"
+        title={`第 ${round} 期样木清单（${rows.length} 株${archived ? '，该期已封存，胸径只读' : '，可点胸径单元格直接修改'}）`}
+      >
         <TreeTable
           items={rows}
           peers={peers}
           onDbhChange={async (treeId, dbhCm) => {
-            await updateTree(treeId, { dbhCm });
-            setToast('胸径已更新，径阶与断面积同步重算');
+            try {
+              await updateTree(treeId, { dbhCm });
+              setToast('胸径已更新，径阶与断面积同步重算');
+            } catch (err) {
+              setError(err instanceof ArchivedRoundError ? err.message : '胸径更新失败，请重试');
+            }
           }}
+          dbhReadOnlyReason={archived ? archiveMessage : undefined}
         />
       </Card>
     </Space>

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Alert, Button, Card, Col, Row, Select, Space, Statistic, Tag, Typography } from 'antd';
-import { SaveOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Row, Select, Space, Statistic, Tag, Tooltip, Typography } from 'antd';
+import { LockOutlined, SaveOutlined } from '@ant-design/icons';
 import { usePlotStore } from '../stores/plotStore';
 import { useTreeStore } from '../stores/treeStore';
 import GrowthDiffTable from '../components/common/GrowthDiffTable';
 import RoundTag from '../components/common/RoundTag';
-import { loadRecheckDiffs, saveRecheckDiffs } from '../utils/db';
+import { ArchivedRoundError, loadRecheckDiffs, saveRecheckDiffs } from '../utils/db';
 import { newId } from '../utils/id';
 import { growthRate, isDiffAbnormal, type RecheckDiff } from '../types/recheck';
 import type { TreeRecord } from '../types/tree';
@@ -29,6 +29,16 @@ export default function RecheckView() {
   const [baseRound, setBaseRound] = useState<number>(rounds[0] ?? 1);
   const [targetRound, setTargetRound] = useState<number>(rounds[rounds.length - 1] ?? 2);
   const [diffs, setDiffs] = useState<RecheckDiff[]>([]);
+  const resultArchived = Boolean(
+    plot?.locked && diffs.some((diff) => diff.targetRound < plot.surveyRound),
+  );
+  const archivedResultRounds = Array.from(
+    new Set(diffs.filter((diff) => plot?.locked && diff.targetRound < plot.surveyRound).map((diff) => diff.targetRound)),
+  ).sort((a, b) => a - b);
+  const resultArchiveMessage =
+    archivedResultRounds.length > 0 && plot
+      ? `第 ${archivedResultRounds.join('、')} 期复查记录已封存，不能新增、修改或移除；当前第 ${plot.surveyRound} 期复查结果仍可保存，解锁后可改动往期。`
+      : '';
   const [toast, setToast] = useState('');
   const [error, setError] = useState('');
 
@@ -107,8 +117,13 @@ export default function RecheckView() {
       setError('请先生成比对表');
       return;
     }
-    await saveRecheckDiffs(diffs);
-    setToast(`逐株比对表已写入本地档案库（${diffs.length} 条）`);
+    try {
+      await saveRecheckDiffs(diffs);
+      setError('');
+      setToast(`逐株比对表已写入本地档案库（${diffs.length} 条）`);
+    } catch (err) {
+      setError(err instanceof ArchivedRoundError ? err.message : '复查结果保存失败，请重试');
+    }
   };
 
   const abnormal = diffs.filter(isDiffAbnormal).length;
@@ -152,6 +167,17 @@ export default function RecheckView() {
 
       {toast ? <Alert type="success" showIcon message={toast} closable onClose={() => setToast('')} /> : null}
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError('')} /> : null}
+      {plot.locked ? (
+        <Alert
+          type="info"
+          showIcon
+          message="往期复查记录已封存"
+          description={`小于当前第 ${plot.surveyRound} 期的复查记录不能新增、修改或移除；当前期复查结果仍可保存，解锁后恢复往期改动。`}
+        />
+      ) : null}
+      {resultArchived ? (
+        <Alert type="warning" showIcon message="当前比对结果属于已封存期次" description={resultArchiveMessage} />
+      ) : null}
 
       <Card size="small">
         <Space wrap size={10}>
@@ -176,9 +202,17 @@ export default function RecheckView() {
           <Button type="primary" onClick={generate}>
             生成逐株比对表
           </Button>
-          <Button icon={<SaveOutlined />} onClick={save}>
-            保存比对结果
-          </Button>
+          <Tooltip title={resultArchived ? resultArchiveMessage : undefined}>
+            <span>
+              <Button
+                icon={resultArchived ? <LockOutlined /> : <SaveOutlined />}
+                onClick={save}
+                disabled={resultArchived}
+              >
+                保存比对结果
+              </Button>
+            </span>
+          </Tooltip>
           <Typography.Text type="secondary">
             可选期次：{rounds.length === 0 ? '暂无数据' : rounds.map((r) => `第 ${r} 期`).join('、')}
           </Typography.Text>

@@ -9,7 +9,7 @@ export interface RoundTagProps {
 export default function RoundTag({ round, locked = false }: RoundTagProps) {
   return (
     <Tag color={round > 1 ? 'geekblue' : 'default'} data-testid={`round-tag-${round}`}>
-      第 {round} 期{locked ? ' · 已锁定' : ''}
+      第 {round} 期{locked ? ' · 往期已锁定' : ''}
     </Tag>
   );
 }

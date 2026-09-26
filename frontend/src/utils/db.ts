@@ -9,6 +9,78 @@ export const DB_NAME = 'gbforestplot';
 export const DB_VERSION = 2;
 export const LS_VERSION_KEY = 'gbforestplot:db-version';
 
+type RoundScopedRecord = {
+  plotId: string;
+  round: number;
+};
+
+type RoundScopedTable = Table<RoundScopedRecord, string>;
+
+export type ArchiveOperation = '新增' | '修改' | '移除';
+
+/** 往期已封存时抛出，界面可据此给出明确提示 */
+export class ArchivedRoundError extends Error {
+  round: number;
+  operation: ArchiveOperation;
+
+  constructor(round: number, noun: string, operation: ArchiveOperation = '修改') {
+    super(`第 ${round} 期已封存，不能${operation}${noun}；如需改动请先在台账解锁往期`);
+    this.name = 'ArchivedRoundError';
+    this.round = round;
+    this.operation = operation;
+  }
+}
+
+async function assertRoundWritable(
+  record: RoundScopedRecord,
+  noun: string,
+  operation: ArchiveOperation = '修改',
+): Promise<void> {
+  const plot = await db.plots.get(record.plotId);
+  if (plot?.locked && record.round < plot.surveyRound) {
+    throw new ArchivedRoundError(record.round, noun, operation);
+  }
+}
+
+async function assertExistingRoundWritable(
+  table: RoundScopedTable,
+  id: string,
+  noun: string,
+  operation: ArchiveOperation = '修改',
+): Promise<RoundScopedRecord | undefined> {
+  const record = await table.get(id);
+  if (!record) return undefined;
+  await assertRoundWritable(record, noun, operation);
+  return record;
+}
+
+async function assertPatchRoundWritable(
+  table: RoundScopedTable,
+  id: string,
+  patch: Partial<RoundScopedRecord>,
+  noun: string,
+): Promise<void> {
+  const record = await table.get(id);
+  if (!record) return;
+  await assertRoundWritable(record, noun, '修改');
+  await assertRoundWritable(
+    {
+      plotId: patch.plotId ?? record.plotId,
+      round: patch.round ?? record.round,
+    },
+    noun,
+    '修改',
+  );
+}
+
+async function assertRecordsWritable(
+  records: RoundScopedRecord[],
+  noun: string,
+  operation: ArchiveOperation = '新增',
+): Promise<void> {
+  await Promise.all(records.map((record) => assertRoundWritable(record, noun, operation)));
+}
+
 class ForestPlotDB extends Dexie {
   plots!: Table<Plot, string>;
   trees!: Table<TreeRecord, string>;
@@ -51,6 +123,34 @@ class ForestPlotDB extends Dexie {
 
 export const db = new ForestPlotDB();
 
+export async function assertTreeCanAdd(record: RoundScopedRecord): Promise<void> {
+  await assertRoundWritable(record, '样木', '新增');
+}
+
+export async function assertTreesCanAdd(records: RoundScopedRecord[]): Promise<void> {
+  await assertRecordsWritable(records, '样木', '新增');
+}
+
+export async function assertTreeCanUpdate(id: string, patch: Partial<RoundScopedRecord>): Promise<void> {
+  await assertPatchRoundWritable(db.trees as RoundScopedTable, id, patch, '样木');
+}
+
+export async function assertTreeCanRemove(id: string): Promise<void> {
+  await assertExistingRoundWritable(db.trees as RoundScopedTable, id, '样木', '移除');
+}
+
+export async function assertRegenCanAdd(record: RoundScopedRecord): Promise<void> {
+  await assertRoundWritable(record, '样方记录', '新增');
+}
+
+export async function assertRegenCanUpdate(id: string, patch: Partial<RoundScopedRecord>): Promise<void> {
+  await assertPatchRoundWritable(db.regens as RoundScopedTable, id, patch, '样方记录');
+}
+
+export async function assertRegenCanRemove(id: string): Promise<void> {
+  await assertExistingRoundWritable(db.regens as RoundScopedTable, id, '样方记录', '移除');
+}
+
 export function markDbVersion(): void {
   try {
     window.localStorage.setItem(LS_VERSION_KEY, String(DB_VERSION));
@@ -69,7 +169,32 @@ export function readDbVersion(): number {
 }
 
 export async function saveRecheckDiffs(diffs: RecheckDiff[]): Promise<void> {
+  if (diffs.length === 0) return;
+
+  const plotIds = Array.from(new Set(diffs.map((diff) => diff.plotId)));
+  const plots = await db.plots.bulkGet(plotIds);
+  const plotMap = new Map(plots.filter((plot): plot is Plot => Boolean(plot)).map((plot) => [plot.id, plot]));
+
+  diffs.forEach((diff) => {
+    const plot = plotMap.get(diff.plotId);
+    if (!plot?.locked) return;
+
+    if (diff.targetRound < plot.surveyRound) {
+      throw new ArchivedRoundError(diff.targetRound, '复查记录', '修改');
+    }
+  });
+
   await db.rechecks.bulkPut(diffs);
+}
+
+export async function removeRecheckDiff(id: string): Promise<void> {
+  const diff = await db.rechecks.get(id);
+  if (!diff) return;
+  const plot = await db.plots.get(diff.plotId);
+  if (plot?.locked && diff.targetRound < plot.surveyRound) {
+    throw new ArchivedRoundError(diff.targetRound, '复查记录', '移除');
+  }
+  await db.rechecks.delete(id);
 }
 
 export async function loadRecheckDiffs(plotId: string): Promise<RecheckDiff[]> {
